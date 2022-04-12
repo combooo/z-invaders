@@ -11,15 +11,15 @@ class Grid {
             y: 0
         };
         this.velocity = {
-            x: 3,
+            x: 5,
             y: 0
         };
         this.invaders = [];
         
-        const rows = Math.floor(Math.random() + 1);
+        const rows = Math.floor(Math.random() + 2);
         const cols = Math.floor(Math.random() * 3 + 2);
 
-        this.width = cols* 150;
+        this.width = cols * 150;
 
         for(let x = 0; x < cols; x++) {
             for(let y = 0; y < rows; y++) {
@@ -54,6 +54,7 @@ class Player {
             y: 0
         }
         this.rotation = 0;
+        this.opacity = 1;
         const image = new Image();
         image.src = './images/tankUA.png';
         image.onload = () => {
@@ -70,6 +71,7 @@ class Player {
     draw() {
         if(this.image) {
             ctx.save();
+            ctx.globalAlpha = this.opacity;
             ctx.translate(
                         player.position.x + player.width / 2, 
                         player.position.y + player.height / 2
@@ -134,6 +136,19 @@ class ZInvader {
             this.position.y += velocity.y;
         }
     }
+
+    shoot(invaderProjectiles) {
+        invaderProjectiles.push(new InvaderProjectile({
+            position: {
+                x: this.position.x + this.width / 2,
+                y: this.position.y + this.height
+            },
+            velocity: {
+                x: 0,
+                y: 5
+            }
+        }))
+    }
 }
 
 class Projectile {
@@ -146,9 +161,62 @@ class Projectile {
     draw() {
         ctx.beginPath();
         ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'yellow';
+        ctx.fillStyle = 'black';
         ctx.fill();
         ctx.closePath();
+    }
+
+    update() {
+        this.draw();
+        this.position.x += this.velocity.x;
+        this.position.y += this.velocity.y;
+    }
+}
+
+class Particle {
+    constructor({position, velocity, radius, color}) {
+        this.position = position;
+        this.velocity = velocity;
+        this.radius = radius;
+        this.color = color;
+        this.opacity = 1;
+    }
+
+    draw() {
+        ctx.save();
+        ctx.globalAlpha = this.opacity;
+        ctx.beginPath();
+        ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.closePath();
+        ctx.restore();
+    }
+
+    update() {
+        this.draw();
+        this.position.x += this.velocity.x;
+        this.position.y += this.velocity.y;
+        this.opacity -= 0.01;
+    }
+}
+
+class InvaderProjectile {
+    constructor({position, velocity}) {
+        this.position = position;
+        this.velocity = velocity;
+        this.width = 5;
+        this.height = 15;
+    }
+
+    draw() {
+        ctx.fillStyle = 'red';
+        ctx.fillRect(
+            this.position.x, 
+            this.position.y, 
+            this.width, 
+            this.height
+        )
     }
 
     update() {
@@ -162,6 +230,8 @@ class Projectile {
 const player = new Player();
 const projectiles = [];
 const grids = [];
+const invaderProjectiles = [];
+const particles = [];
 const keys = {
     arrowLeft: {
         pressed: false
@@ -176,13 +246,76 @@ const keys = {
 
 
 let frames = 0;
-let randomInterval = Math.floor(Math.random() * 500) + 1000;
+let randomInterval = Math.floor(Math.random() * 500) + 500;
+let game = {
+    over: false,
+    active: true
+}
 
+function createParticles({object, color}) {
+    for(let i = 0; i < 15; i++) {
+        particles.push(new Particle({
+            position: {
+                x: object.position.x + object.width / 2,
+                y: object.position.y + object.height / 2
+            },
+            velocity: {
+                x: (Math.random() - 0.5) * 2,
+                y: (Math.random() - 0.5) * 2
+            },
+            radius: Math.random() * 10,
+            color: color || 'black'
+        }))
+    }
+}
 function animate() {
+    if(!game.active) return
     requestAnimationFrame(animate);
     ctx.fillStyle = 'green';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     player.update();
+    particles.forEach((particle, i) => {
+        if(particle.opacity <= 0) {
+            setTimeout(() => {
+                particles.splice(i, 1);
+            }, 0);
+        } else {
+            particle.update();
+        }
+    })
+    invaderProjectiles.forEach((invaderProjectile, index) => {
+        if (invaderProjectile.position.y + invaderProjectile.height >= 
+            canvas.height) {
+            setTimeout(() => {
+                invaderProjectiles.splice(index, 1);
+            }, 0);
+        } else {
+            invaderProjectile.update();
+        }
+        // projectile hits player
+        if(invaderProjectile.position.y + invaderProjectile.height >= 
+            player.position.y && 
+            invaderProjectile.position.x + invaderProjectile.width >= 
+            player.position.x && 
+            invaderProjectile.position.x <= player.position.x + player.width
+        ) {
+            setTimeout(() => {
+                invaderProjectiles.splice(index, 1);
+                player.opacity = 0;
+                game.over = true;
+            }, 0);
+
+            setTimeout(() => {
+                game.active = false;
+            }, 2000);
+
+            createParticles({
+                object: player,
+                color: 'yellow'
+            });
+        }
+    });
+
     projectiles.forEach((projectile, index) => {
         if(projectile.position.y + projectile.radius <= 0) {
             setTimeout(() => {
@@ -194,8 +327,14 @@ function animate() {
     });
     grids.forEach((grid, gridIndex) => {
         grid.update();
+        //spawn projectiles
+        if(frames % 100 === 0 && grid.invaders.length > 0) {
+            grid.invaders[Math.floor(Math.random() * grid.invaders.length)].shoot(invaderProjectiles)
+        }
         grid.invaders.forEach((invader, i) => {
             invader.update({velocity: grid.velocity});
+
+            // projectiles hit enemy
             projectiles.forEach((projectile, j) => {
                 if (
                     projectile.position.y - projectile.radius <= invader.position.y + invader.height && 
@@ -210,8 +349,11 @@ function animate() {
                             (projectile2) => projectile2 === projectile
                         );
                         if(invaderFound && projectileFound) {
+                            createParticles({
+                                object: invader,
+                            });
                             grid.invaders.splice(i, 1);
-                            projectiles.splice(i, 1);
+                            projectiles.splice(j, 1);
 
                             if(grid.invaders.length > 0) {
                                 const firstInvader = grid.invaders[0];
@@ -243,7 +385,7 @@ function animate() {
 
     if(frames % randomInterval === 0) {
         grids.push(new Grid());
-        randomInterval = Math.floor(Math.random() * 500) + 1000;
+        randomInterval = Math.floor(Math.random() * 500) + 500;
         frames = 0;
     }
 
@@ -253,13 +395,12 @@ function animate() {
 animate();
 
 window.addEventListener('keydown', ({key}) => {
+    if(game.over) return 
     switch(key) {
         case 'ArrowLeft':
-            console.log(key)
             keys.arrowLeft.pressed = true;
             break;
         case 'ArrowRight':
-            console.log(key);
             keys.arrowRight.pressed = true;
             break;
         case ' ':
@@ -282,15 +423,12 @@ window.addEventListener('keydown', ({key}) => {
 window.addEventListener('keyup', ({key}) => {
     switch(key) {
         case 'ArrowLeft':
-            console.log(key)
             keys.arrowLeft.pressed = false;
             break;
         case 'ArrowRight':
-            console.log(key);
             keys.arrowRight.pressed = false;
             break;
         case ' ':
-            console.log('space')
             keys.space.pressed = false;
             break;
     }
